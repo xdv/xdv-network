@@ -1,0 +1,14 @@
+﻿# XDV Network Workspace Manifest
+
+[workspace]
+name = "xdv_network"
+version = "0.1.0"
+description = "Cross-domain deterministic network stack for K/Q/Phi orchestration."
+
+[sector]
+name = "xdv_network"
+path = "src"
+
+[target.x64-pc-none]
+linker = "ld"
+linker_flags = ["-nostdlib", "-static"]
