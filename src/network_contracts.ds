@@ -1,0 +1,219 @@
+// File: network_contracts.ds - This file is part of XDV
+// Copyright (c) 2026 Dust LLC, and Contributors
+// Description:
+//   xdv-network: XDV-040 normative constants and contract guards.
+
+forge XdvNetworkContracts {
+
+    const STATUS_OK: UInt32 = 0;
+    const STATUS_INVALID_DOMAIN: UInt32 = 1;
+    const STATUS_INVALID_LAYER: UInt32 = 2;
+    const STATUS_INVALID_MODE: UInt32 = 3;
+    const STATUS_INVALID_CAPABILITY: UInt32 = 4;
+    const STATUS_OPERATION_FORBIDDEN: UInt32 = 5;
+
+    const DOMAIN_K: UInt64 = 0;
+    const DOMAIN_Q: UInt64 = 1;
+    const DOMAIN_PHI: UInt64 = 2;
+
+    const LAYER_KNL: UInt64 = 1;
+    const LAYER_QDL: UInt64 = 2;
+    const LAYER_PSL: UInt64 = 3;
+    const LAYER_STL: UInt64 = 4;
+
+    const MODE_RELIABLE_ORDERED: UInt64 = 1;
+    const MODE_RELIABLE_UNORDERED: UInt64 = 2;
+    const MODE_BEST_EFFORT_ORDERED: UInt64 = 3;
+
+    const CAP_SCOPE_K: UInt64 = 1;
+    const CAP_SCOPE_Q: UInt64 = 2;
+    const CAP_SCOPE_PHI: UInt64 = 4;
+
+    const OP_K_PROCESS: UInt64 = 1;
+    const OP_K_IPC: UInt64 = 2;
+    const OP_K_TRACE_REPL: UInt64 = 3;
+    const OP_K_CONTROL: UInt64 = 4;
+
+    const OP_Q_ENTANGLE: UInt64 = 16;
+    const OP_Q_TELEPORT: UInt64 = 17;
+    const OP_Q_MEASURE: UInt64 = 18;
+    const OP_Q_CONTRACT_SYNC: UInt64 = 19;
+    const OP_Q_RAW_STATE: UInt64 = 20;
+
+    const OP_PHI_WINDOW_ALIGN: UInt64 = 32;
+    const OP_PHI_TRANSFORM_COORD: UInt64 = 33;
+    const OP_PHI_STABILITY_NEGOTIATE: UInt64 = 34;
+    const OP_PHI_IMPLICIT_MERGE: UInt64 = 35;
+
+    proc K::is_domain_valid(domain: UInt64) {
+        if domain == DOMAIN_K {
+            return STATUS_OK;
+        } else {
+            if domain == DOMAIN_Q {
+                return STATUS_OK;
+            } else {
+                if domain == DOMAIN_PHI {
+                    return STATUS_OK;
+                } else {
+                    return STATUS_INVALID_DOMAIN;
+                }
+            }
+        }
+    }
+
+    proc K::is_layer_valid(layer: UInt64) {
+        if layer == LAYER_KNL {
+            return STATUS_OK;
+        } else {
+            if layer == LAYER_QDL {
+                return STATUS_OK;
+            } else {
+                if layer == LAYER_PSL {
+                    return STATUS_OK;
+                } else {
+                    if layer == LAYER_STL {
+                        return STATUS_OK;
+                    } else {
+                        return STATUS_INVALID_LAYER;
+                    }
+                }
+            }
+        }
+    }
+
+    proc K::is_transport_mode_valid(mode: UInt64) {
+        if mode == MODE_RELIABLE_ORDERED {
+            return STATUS_OK;
+        } else {
+            if mode == MODE_RELIABLE_UNORDERED {
+                return STATUS_OK;
+            } else {
+                if mode == MODE_BEST_EFFORT_ORDERED {
+                    return STATUS_OK;
+                } else {
+                    return STATUS_INVALID_MODE;
+                }
+            }
+        }
+    }
+
+    proc K::is_capability_valid_for_domain(domain: UInt64, capability_scope: UInt64) {
+        if domain == DOMAIN_K {
+            if capability_scope == CAP_SCOPE_K {
+                return STATUS_OK;
+            } else {
+                return STATUS_INVALID_CAPABILITY;
+            }
+        } else {
+            if domain == DOMAIN_Q {
+                if capability_scope == CAP_SCOPE_Q {
+                    return STATUS_OK;
+                } else {
+                    return STATUS_INVALID_CAPABILITY;
+                }
+            } else {
+                if domain == DOMAIN_PHI {
+                    if capability_scope == CAP_SCOPE_PHI {
+                        return STATUS_OK;
+                    } else {
+                        return STATUS_INVALID_CAPABILITY;
+                    }
+                } else {
+                    return STATUS_INVALID_DOMAIN;
+                }
+            }
+        }
+    }
+
+    proc K::is_operation_allowed(domain: UInt64, operation: UInt64) {
+        if domain == DOMAIN_K {
+            if operation == OP_K_PROCESS {
+                return STATUS_OK;
+            } else {
+                if operation == OP_K_IPC {
+                    return STATUS_OK;
+                } else {
+                    if operation == OP_K_TRACE_REPL {
+                        return STATUS_OK;
+                    } else {
+                        if operation == OP_K_CONTROL {
+                            return STATUS_OK;
+                        } else {
+                            return STATUS_OPERATION_FORBIDDEN;
+                        }
+                    }
+                }
+            }
+        } else {
+            if domain == DOMAIN_Q {
+                if operation == OP_Q_ENTANGLE {
+                    return STATUS_OK;
+                } else {
+                    if operation == OP_Q_TELEPORT {
+                        return STATUS_OK;
+                    } else {
+                        if operation == OP_Q_MEASURE {
+                            return STATUS_OK;
+                        } else {
+                            if operation == OP_Q_CONTRACT_SYNC {
+                                return STATUS_OK;
+                            } else {
+                                return STATUS_OPERATION_FORBIDDEN;
+                            }
+                        }
+                    }
+                }
+            } else {
+                if domain == DOMAIN_PHI {
+                    if operation == OP_PHI_WINDOW_ALIGN {
+                        return STATUS_OK;
+                    } else {
+                        if operation == OP_PHI_TRANSFORM_COORD {
+                            return STATUS_OK;
+                        } else {
+                            if operation == OP_PHI_STABILITY_NEGOTIATE {
+                                return STATUS_OK;
+                            } else {
+                                return STATUS_OPERATION_FORBIDDEN;
+                            }
+                        }
+                    }
+                } else {
+                    return STATUS_INVALID_DOMAIN;
+                }
+            }
+        }
+    }
+
+    proc K::domain_default_layer(domain: UInt64) {
+        if domain == DOMAIN_K {
+            return LAYER_KNL;
+        } else {
+            if domain == DOMAIN_Q {
+                return LAYER_QDL;
+            } else {
+                if domain == DOMAIN_PHI {
+                    return LAYER_PSL;
+                } else {
+                    return LAYER_STL;
+                }
+            }
+        }
+    }
+
+    proc K::domain_requires_attestation(domain: UInt64) {
+        if domain == DOMAIN_K {
+            return 0;
+        } else {
+            if domain == DOMAIN_Q {
+                return 1;
+            } else {
+                if domain == DOMAIN_PHI {
+                    return 1;
+                } else {
+                    return 1;
+                }
+            }
+        }
+    }
+}

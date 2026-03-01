@@ -1,0 +1,140 @@
+// File: network_channels.ds - This file is part of XDV
+// Copyright (c) 2026 Dust LLC, and Contributors
+// Description:
+//   xdv-network: domain-aware K/Q/Phi channel routing with deterministic framing.
+
+forge XdvNetworkChannels {
+
+    const STATUS_OK: UInt32 = 0;
+    const STATUS_ROUTE_FAILED: UInt32 = 1;
+    const STATUS_SECURE_TRANSPORT_FAILED: UInt32 = 2;
+    const STATUS_ORDER_FAILED: UInt32 = 3;
+
+    const DOMAIN_K: UInt64 = 0;
+    const DOMAIN_Q: UInt64 = 1;
+    const DOMAIN_PHI: UInt64 = 2;
+
+    const CAP_SCOPE_K: UInt64 = 1;
+    const CAP_SCOPE_Q: UInt64 = 2;
+    const CAP_SCOPE_PHI: UInt64 = 4;
+
+    const MODE_RELIABLE_ORDERED: UInt64 = 1;
+
+    const FAULT_NONE: UInt64 = 0;
+
+    proc K::channel_id_for_domain(domain: UInt64) {
+        if domain == DOMAIN_K {
+            return 100;
+        } else {
+            if domain == DOMAIN_Q {
+                return 200;
+            } else {
+                if domain == DOMAIN_PHI {
+                    return 300;
+                } else {
+                    return 0;
+                }
+            }
+        }
+    }
+
+    proc K::derive_payload_hash(operation: UInt64, capability_scope: UInt64, local_node_id: UInt64, remote_node_id: UInt64, logical_ts: UInt64, sequence: UInt64) {
+        let mixed = (operation * 97) + (capability_scope * 193) + (local_node_id * 389) + (remote_node_id * 769) + (logical_ts * 1543) + (sequence * 3079);
+        return mixed - ((mixed / 100) * 100);
+    }
+
+    proc K::build_domain_frame_token(domain: UInt64, capability_scope: UInt64, operation: UInt64, logical_ts: UInt64, local_node_id: UInt64, process_rank: UInt64, sequence: UInt64, fault_code: UInt64) {
+        let layer = XdvNetworkContracts::K::domain_default_layer(domain);
+        let fault_epoch = XdvNetworkOrder::K::fault_epoch(fault_code);
+        if fault_epoch == 0 {
+            return 0;
+        } else {
+            let header = XdvNetworkFrame::K::encode_header(domain, layer, MODE_RELIABLE_ORDERED, logical_ts, local_node_id, process_rank, sequence, fault_epoch);
+            if header == 0 {
+                return 0;
+            } else {
+                let payload_hash = derive_payload_hash(operation, capability_scope, local_node_id, local_node_id + 1, logical_ts, sequence);
+                return XdvNetworkFrame::K::encode_frame_token(header, payload_hash);
+            }
+        }
+    }
+
+    proc K::open_domain_session(local_node_id: UInt64, remote_node_id: UInt64, domain: UInt64, capability_scope: UInt64, attestation_token: UInt64) {
+        let local_identity = local_node_id + 4096;
+        let peer_identity = remote_node_id + 8192;
+        let pq_nonce = (local_node_id * 256) + domain + 17;
+        let hybrid_nonce = (remote_node_id * 256) + capability_scope + 29;
+        return XdvNetworkSecureTransport::K::open_session(local_identity, peer_identity, capability_scope, domain, attestation_token, pq_nonce, hybrid_nonce);
+    }
+
+    proc K::send_domain_operation(domain: UInt64, capability_scope: UInt64, operation: UInt64, logical_ts: UInt64, local_node_id: UInt64, remote_node_id: UInt64, process_rank: UInt64, sequence: UInt64, fault_code: UInt64, attestation_token: UInt64) {
+        let domain_valid = XdvNetworkContracts::K::is_domain_valid(domain);
+        if domain_valid == STATUS_OK {
+            let cap_valid = XdvNetworkContracts::K::is_capability_valid_for_domain(domain, capability_scope);
+            if cap_valid == STATUS_OK {
+                let operation_valid = XdvNetworkContracts::K::is_operation_allowed(domain, operation);
+                if operation_valid == STATUS_OK {
+                    let channel = channel_id_for_domain(domain);
+                    if channel == 0 {
+                        return STATUS_ROUTE_FAILED;
+                    } else {
+                        let session = open_domain_session(local_node_id, remote_node_id, domain, capability_scope, attestation_token);
+                        if session == 0 {
+                            return STATUS_SECURE_TRANSPORT_FAILED;
+                        } else {
+                            let frame_token = build_domain_frame_token(domain, capability_scope, operation, logical_ts, local_node_id, process_rank, sequence, fault_code);
+                            if frame_token == 0 {
+                                return STATUS_ROUTE_FAILED;
+                            } else {
+                                let payload_hash = derive_payload_hash(operation, capability_scope, local_node_id, remote_node_id, logical_ts, sequence);
+                                let pre = XdvNetworkSecureTransport::K::stl_pre_send_hook(session, frame_token, payload_hash);
+                                if pre == STATUS_OK {
+                                    if fault_code == FAULT_NONE {
+                                        let post = XdvNetworkSecureTransport::K::stl_post_receive_hook(session, frame_token, payload_hash);
+                                        if post == STATUS_OK {
+                                            return STATUS_OK;
+                                        } else {
+                                            return STATUS_SECURE_TRANSPORT_FAILED;
+                                        }
+                                    } else {
+                                        let order = XdvNetworkOrder::K::reconcile_fault_path(domain, XdvNetworkContracts::K::domain_default_layer(domain), MODE_RELIABLE_ORDERED, logical_ts, local_node_id, process_rank, sequence, fault_code);
+                                        if order == STATUS_OK {
+                                            let post = XdvNetworkSecureTransport::K::stl_post_receive_hook(session, frame_token, payload_hash);
+                                            if post == STATUS_OK {
+                                                return STATUS_OK;
+                                            } else {
+                                                return STATUS_SECURE_TRANSPORT_FAILED;
+                                            }
+                                        } else {
+                                            return STATUS_ORDER_FAILED;
+                                        }
+                                    }
+                                } else {
+                                    return STATUS_SECURE_TRANSPORT_FAILED;
+                                }
+                            }
+                        }
+                    }
+                } else {
+                    return STATUS_ROUTE_FAILED;
+                }
+            } else {
+                return STATUS_ROUTE_FAILED;
+            }
+        } else {
+            return STATUS_ROUTE_FAILED;
+        }
+    }
+
+    proc K::send_k_channel(operation: UInt64, logical_ts: UInt64, local_node_id: UInt64, remote_node_id: UInt64, process_rank: UInt64, sequence: UInt64, fault_code: UInt64) {
+        return send_domain_operation(DOMAIN_K, CAP_SCOPE_K, operation, logical_ts, local_node_id, remote_node_id, process_rank, sequence, fault_code, 0);
+    }
+
+    proc K::send_q_channel(operation: UInt64, logical_ts: UInt64, local_node_id: UInt64, remote_node_id: UInt64, process_rank: UInt64, sequence: UInt64, fault_code: UInt64, attestation_token: UInt64) {
+        return send_domain_operation(DOMAIN_Q, CAP_SCOPE_Q, operation, logical_ts, local_node_id, remote_node_id, process_rank, sequence, fault_code, attestation_token);
+    }
+
+    proc K::send_phi_channel(operation: UInt64, logical_ts: UInt64, local_node_id: UInt64, remote_node_id: UInt64, process_rank: UInt64, sequence: UInt64, fault_code: UInt64, attestation_token: UInt64) {
+        return send_domain_operation(DOMAIN_PHI, CAP_SCOPE_PHI, operation, logical_ts, local_node_id, remote_node_id, process_rank, sequence, fault_code, attestation_token);
+    }
+}

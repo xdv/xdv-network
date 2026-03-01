@@ -1,2 +1,63 @@
-﻿# XDV Network bootstrap surface
-# TODO: implement module entrypoint
+// File: main.ds - This file is part of XDV
+// Copyright (c) 2026 Dust LLC, and Contributors
+// Description:
+//   xdv-network: top-level entrypoints for XDV-040 stack.
+
+forge XdvNetworkMain {
+
+    const STATUS_OK: UInt32 = 0;
+    const STATUS_BOOTSTRAP_FAILED: UInt32 = 1;
+
+    const DOMAIN_K: UInt64 = 0;
+    const CAP_SCOPE_K: UInt64 = 1;
+    const OP_K_CONTROL: UInt64 = 4;
+
+    const FAULT_NONE: UInt64 = 0;
+
+    proc K::network_startup_validation() {
+        let d_k = XdvNetworkContracts::K::is_domain_valid(DOMAIN_K);
+        let layer = XdvNetworkContracts::K::is_layer_valid(XdvNetworkContracts::K::domain_default_layer(DOMAIN_K));
+        let mode = XdvNetworkContracts::K::is_transport_mode_valid(1);
+        let cap = XdvNetworkContracts::K::is_capability_valid_for_domain(DOMAIN_K, CAP_SCOPE_K);
+
+        if d_k == STATUS_OK {
+            if layer == STATUS_OK {
+                if mode == STATUS_OK {
+                    if cap == STATUS_OK {
+                        return STATUS_OK;
+                    } else {
+                        return STATUS_BOOTSTRAP_FAILED;
+                    }
+                } else {
+                    return STATUS_BOOTSTRAP_FAILED;
+                }
+            } else {
+                return STATUS_BOOTSTRAP_FAILED;
+            }
+        } else {
+            return STATUS_BOOTSTRAP_FAILED;
+        }
+    }
+
+    proc K::network_smoke_send() {
+        return XdvNetworkChannels::K::send_k_channel(OP_K_CONTROL, 1, 1, 2, 1, 1, FAULT_NONE);
+    }
+
+    proc K::network_run_self_tests() {
+        return XdvNetworkTests::K::run_all_tests();
+    }
+
+    proc K::network_bootstrap() {
+        let startup = network_startup_validation();
+        if startup == STATUS_OK {
+            let smoke = network_smoke_send();
+            if smoke == STATUS_OK {
+                return STATUS_OK;
+            } else {
+                return STATUS_BOOTSTRAP_FAILED;
+            }
+        } else {
+            return STATUS_BOOTSTRAP_FAILED;
+        }
+    }
+}

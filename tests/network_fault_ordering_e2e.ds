@@ -1,0 +1,10 @@
+// File: network_fault_ordering_e2e.ds - This file is part of XDV
+// Copyright (c) 2026 Dust LLC, and Contributors
+// Description:
+//   xdv-network: aggregate test entrypoint for XDV-040 behavior checks.
+
+forge XdvNetworkE2E {
+    proc K::run_all_tests() {
+        return XdvNetworkTests::K::run_all_tests();
+    }
+}

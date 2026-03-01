@@ -1,0 +1,148 @@
+// File: network_tests.ds - This file is part of XDV
+// Copyright (c) 2026 Dust LLC, and Contributors
+// Description:
+//   xdv-network: deterministic framing, secure transport, domain channel, and fault ordering tests.
+
+forge XdvNetworkTests {
+
+    const TEST_PASS: UInt32 = 0;
+    const TEST_FAIL: UInt32 = 1;
+
+    const STATUS_OK: UInt32 = 0;
+
+    const DOMAIN_K: UInt64 = 0;
+    const DOMAIN_Q: UInt64 = 1;
+    const DOMAIN_PHI: UInt64 = 2;
+
+    const LAYER_KNL: UInt64 = 1;
+
+    const MODE_RELIABLE_ORDERED: UInt64 = 1;
+
+    const OP_K_PROCESS: UInt64 = 1;
+    const OP_Q_MEASURE: UInt64 = 18;
+    const OP_Q_RAW_STATE: UInt64 = 20;
+    const OP_PHI_WINDOW_ALIGN: UInt64 = 32;
+    const OP_PHI_IMPLICIT_MERGE: UInt64 = 35;
+
+    const FAULT_NONE: UInt64 = 0;
+    const FAULT_LINK_DROP: UInt64 = 1;
+    const FAULT_RETRY_TIMEOUT: UInt64 = 2;
+    const FAULT_PARTITIONED_PATH: UInt64 = 3;
+
+    proc K::expect_u32(actual: UInt32, expected: UInt32) {
+        if actual == expected {
+            return TEST_PASS;
+        } else {
+            return TEST_FAIL;
+        }
+    }
+
+    proc K::expect_u64(actual: UInt64, expected: UInt64) {
+        if actual == expected {
+            return TEST_PASS;
+        } else {
+            return TEST_FAIL;
+        }
+    }
+
+    proc K::combine(lhs: UInt32, rhs: UInt32) {
+        if lhs == TEST_PASS {
+            return rhs;
+        } else {
+            return TEST_FAIL;
+        }
+    }
+
+    proc K::test_deterministic_framing() {
+        let header_a = XdvNetworkFrame::K::encode_header(DOMAIN_K, LAYER_KNL, MODE_RELIABLE_ORDERED, 25, 2, 7, 31, 1);
+        let header_b = XdvNetworkFrame::K::encode_header(DOMAIN_K, LAYER_KNL, MODE_RELIABLE_ORDERED, 25, 2, 7, 31, 1);
+        let header_c = XdvNetworkFrame::K::encode_header(DOMAIN_K, LAYER_KNL, MODE_RELIABLE_ORDERED, 25, 2, 7, 32, 1);
+
+        let token_a = XdvNetworkFrame::K::encode_frame_token(header_a, 1024);
+        let token_b = XdvNetworkFrame::K::encode_frame_token(header_b, 1024);
+        let token_c = XdvNetworkFrame::K::encode_frame_token(header_c, 1024);
+
+        let t1 = expect_u64(header_a, header_b);
+        let t2 = expect_u64(token_a, token_b);
+        let t3 = expect_u32(XdvNetworkFrame::K::validate_frame_token(token_a, 1024), STATUS_OK);
+
+        if token_a == token_c {
+            return TEST_FAIL;
+        } else {
+            let u1 = combine(t1, t2);
+            return combine(u1, t3);
+        }
+    }
+
+    proc K::test_secure_transport_hooks() {
+        let attest_q = XdvNetworkSecureTransport::K::build_attestation_token(DOMAIN_Q, 2, 99);
+        let session_q = XdvNetworkSecureTransport::K::open_session(5001, 6001, 2, DOMAIN_Q, attest_q, 77, 88);
+
+        let header_q = XdvNetworkFrame::K::encode_header(DOMAIN_Q, 2, MODE_RELIABLE_ORDERED, 30, 3, 4, 8, 1);
+        let token_q = XdvNetworkFrame::K::encode_frame_token(header_q, 2048);
+
+        let pre_ok = XdvNetworkSecureTransport::K::stl_pre_send_hook(session_q, token_q, 2048);
+        let post_ok = XdvNetworkSecureTransport::K::stl_post_receive_hook(session_q, token_q, 2048);
+
+        let bad_session = XdvNetworkSecureTransport::K::open_session(5001, 6001, 2, DOMAIN_Q, 0, 77, 88);
+
+        let t1 = expect_u32(pre_ok, STATUS_OK);
+        let t2 = expect_u32(post_ok, STATUS_OK);
+
+        let u1 = combine(t1, t2);
+        if bad_session == 0 {
+            return u1;
+        } else {
+            return TEST_FAIL;
+        }
+    }
+
+    proc K::test_domain_aware_channels() {
+        let attest_q = XdvNetworkSecureTransport::K::build_attestation_token(DOMAIN_Q, 2, 777);
+        let attest_phi = XdvNetworkSecureTransport::K::build_attestation_token(DOMAIN_PHI, 2, 888);
+
+        let k_ok = XdvNetworkChannels::K::send_k_channel(OP_K_PROCESS, 40, 3, 4, 6, 11, FAULT_NONE);
+        let q_ok = XdvNetworkChannels::K::send_q_channel(OP_Q_MEASURE, 41, 3, 4, 6, 12, FAULT_NONE, attest_q);
+        let phi_ok = XdvNetworkChannels::K::send_phi_channel(OP_PHI_WINDOW_ALIGN, 42, 3, 4, 6, 13, FAULT_NONE, attest_phi);
+
+        let q_forbidden = XdvNetworkChannels::K::send_q_channel(OP_Q_RAW_STATE, 43, 3, 4, 6, 14, FAULT_NONE, attest_q);
+        let phi_forbidden = XdvNetworkChannels::K::send_phi_channel(OP_PHI_IMPLICIT_MERGE, 44, 3, 4, 6, 15, FAULT_NONE, attest_phi);
+
+        let t1 = expect_u32(k_ok, STATUS_OK);
+        let t2 = expect_u32(q_ok, STATUS_OK);
+        let t3 = expect_u32(phi_ok, STATUS_OK);
+
+        let u1 = combine(t1, t2);
+        let u2 = combine(u1, t3);
+
+        if q_forbidden == STATUS_OK {
+            return TEST_FAIL;
+        } else {
+            if phi_forbidden == STATUS_OK {
+                return TEST_FAIL;
+            } else {
+                return u2;
+            }
+        }
+    }
+
+    proc K::test_fault_ordering() {
+        let o1 = XdvNetworkOrder::K::reconcile_fault_path(DOMAIN_K, LAYER_KNL, MODE_RELIABLE_ORDERED, 50, 2, 5, 20, FAULT_LINK_DROP);
+        let o2 = XdvNetworkOrder::K::reconcile_fault_path(DOMAIN_K, LAYER_KNL, MODE_RELIABLE_ORDERED, 51, 2, 5, 21, FAULT_RETRY_TIMEOUT);
+        let o3 = XdvNetworkOrder::K::reconcile_fault_path(DOMAIN_K, LAYER_KNL, MODE_RELIABLE_ORDERED, 52, 2, 5, 22, FAULT_PARTITIONED_PATH);
+
+        let t1 = expect_u32(o1, STATUS_OK);
+        let t2 = expect_u32(o2, STATUS_OK);
+        let t3 = expect_u32(o3, STATUS_OK);
+
+        let u1 = combine(t1, t2);
+        return combine(u1, t3);
+    }
+
+    proc K::run_all_tests() {
+        let t1 = test_deterministic_framing();
+        let t2 = combine(t1, test_secure_transport_hooks());
+        let t3 = combine(t2, test_domain_aware_channels());
+        return combine(t3, test_fault_ordering());
+    }
+}

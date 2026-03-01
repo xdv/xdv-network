@@ -1,0 +1,226 @@
+// File: network_frame.ds - This file is part of XDV
+// Copyright (c) 2026 Dust LLC, and Contributors
+// Description:
+//   xdv-network: deterministic framing and ordering keys (XDV-040 KNL/QDL/PSL).
+
+forge XdvNetworkFrame {
+
+    const STATUS_OK: UInt32 = 0;
+    const STATUS_INVALID_FIELDS: UInt32 = 1;
+    const STATUS_INVALID_FRAME: UInt32 = 2;
+
+    const MAX_DOMAIN: UInt64 = 9;
+    const MAX_LAYER: UInt64 = 9;
+    const MAX_MODE: UInt64 = 9;
+    const MAX_PAYLOAD_HASH: UInt64 = 99;
+    const MAX_FAULT_EPOCH: UInt64 = 99;
+    const MAX_SEQUENCE: UInt64 = 99999;
+    const MAX_PROCESS_RANK: UInt64 = 999;
+    const MAX_NODE_ID: UInt64 = 99;
+    const MAX_LOGICAL_TS: UInt64 = 99;
+
+    const FACTOR_PAYLOAD: UInt64 = 1;
+    const FACTOR_DOMAIN: UInt64 = 100;
+    const FACTOR_LAYER: UInt64 = 1000;
+    const FACTOR_MODE: UInt64 = 10000;
+    const FACTOR_FAULT_EPOCH: UInt64 = 100000;
+    const FACTOR_SEQUENCE: UInt64 = 10000000;
+    const FACTOR_PROCESS_RANK: UInt64 = 1000000000000;
+    const FACTOR_NODE_ID: UInt64 = 1000000000000000;
+    const FACTOR_LOGICAL_TS: UInt64 = 100000000000000000;
+
+    proc K::normalize_payload_hash(payload_hash: UInt64) {
+        if payload_hash > MAX_PAYLOAD_HASH {
+            return payload_hash - ((payload_hash / 100) * 100);
+        } else {
+            return payload_hash;
+        }
+    }
+
+    proc K::is_valid_field_set(domain: UInt64, layer: UInt64, mode: UInt64, logical_ts: UInt64, node_id: UInt64, process_rank: UInt64, sequence: UInt64, fault_epoch: UInt64) {
+        if domain > MAX_DOMAIN {
+            return STATUS_INVALID_FIELDS;
+        } else {
+            if layer > MAX_LAYER {
+                return STATUS_INVALID_FIELDS;
+            } else {
+                if mode > MAX_MODE {
+                    return STATUS_INVALID_FIELDS;
+                } else {
+                    if logical_ts > MAX_LOGICAL_TS {
+                        return STATUS_INVALID_FIELDS;
+                    } else {
+                        if node_id > MAX_NODE_ID {
+                            return STATUS_INVALID_FIELDS;
+                        } else {
+                            if process_rank > MAX_PROCESS_RANK {
+                                return STATUS_INVALID_FIELDS;
+                            } else {
+                                if sequence > MAX_SEQUENCE {
+                                    return STATUS_INVALID_FIELDS;
+                                } else {
+                                    if fault_epoch > MAX_FAULT_EPOCH {
+                                        return STATUS_INVALID_FIELDS;
+                                    } else {
+                                        return STATUS_OK;
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    proc K::encode_header(domain: UInt64, layer: UInt64, mode: UInt64, logical_ts: UInt64, node_id: UInt64, process_rank: UInt64, sequence: UInt64, fault_epoch: UInt64) {
+        let valid = is_valid_field_set(domain, layer, mode, logical_ts, node_id, process_rank, sequence, fault_epoch);
+        if valid == STATUS_OK {
+            let part_logical = logical_ts * FACTOR_LOGICAL_TS;
+            let part_node = node_id * FACTOR_NODE_ID;
+            let part_rank = process_rank * FACTOR_PROCESS_RANK;
+            let part_sequence = sequence * FACTOR_SEQUENCE;
+            let part_fault = fault_epoch * FACTOR_FAULT_EPOCH;
+            let part_mode = mode * FACTOR_MODE;
+            let part_layer = layer * FACTOR_LAYER;
+            let part_domain = domain * FACTOR_DOMAIN;
+            return part_logical + part_node + part_rank + part_sequence + part_fault + part_mode + part_layer + part_domain;
+        } else {
+            return 0;
+        }
+    }
+
+    proc K::encode_frame_token(header: UInt64, payload_hash: UInt64) {
+        let normalized_payload = normalize_payload_hash(payload_hash);
+        return header + (normalized_payload * FACTOR_PAYLOAD);
+    }
+
+    proc K::decode_frame_header(frame_token: UInt64) {
+        let payload = decode_frame_payload(frame_token);
+        return frame_token - payload;
+    }
+
+    proc K::decode_frame_payload(frame_token: UInt64) {
+        return frame_token - ((frame_token / FACTOR_DOMAIN) * FACTOR_DOMAIN);
+    }
+
+    proc K::decode_logical_ts(header: UInt64) {
+        return header / FACTOR_LOGICAL_TS;
+    }
+
+    proc K::decode_node_id(header: UInt64) {
+        let logical = decode_logical_ts(header);
+        let remainder = header - (logical * FACTOR_LOGICAL_TS);
+        return remainder / FACTOR_NODE_ID;
+    }
+
+    proc K::decode_process_rank(header: UInt64) {
+        let logical = decode_logical_ts(header);
+        let rem_a = header - (logical * FACTOR_LOGICAL_TS);
+        let node = rem_a / FACTOR_NODE_ID;
+        let rem_b = rem_a - (node * FACTOR_NODE_ID);
+        return rem_b / FACTOR_PROCESS_RANK;
+    }
+
+    proc K::decode_sequence(header: UInt64) {
+        let logical = decode_logical_ts(header);
+        let rem_a = header - (logical * FACTOR_LOGICAL_TS);
+        let node = rem_a / FACTOR_NODE_ID;
+        let rem_b = rem_a - (node * FACTOR_NODE_ID);
+        let rank = rem_b / FACTOR_PROCESS_RANK;
+        let rem_c = rem_b - (rank * FACTOR_PROCESS_RANK);
+        return rem_c / FACTOR_SEQUENCE;
+    }
+
+    proc K::decode_fault_epoch(header: UInt64) {
+        let logical = decode_logical_ts(header);
+        let rem_a = header - (logical * FACTOR_LOGICAL_TS);
+        let node = rem_a / FACTOR_NODE_ID;
+        let rem_b = rem_a - (node * FACTOR_NODE_ID);
+        let rank = rem_b / FACTOR_PROCESS_RANK;
+        let rem_c = rem_b - (rank * FACTOR_PROCESS_RANK);
+        let sequence = rem_c / FACTOR_SEQUENCE;
+        let rem_d = rem_c - (sequence * FACTOR_SEQUENCE);
+        return rem_d / FACTOR_FAULT_EPOCH;
+    }
+
+    proc K::decode_mode(header: UInt64) {
+        let logical = decode_logical_ts(header);
+        let rem_a = header - (logical * FACTOR_LOGICAL_TS);
+        let node = rem_a / FACTOR_NODE_ID;
+        let rem_b = rem_a - (node * FACTOR_NODE_ID);
+        let rank = rem_b / FACTOR_PROCESS_RANK;
+        let rem_c = rem_b - (rank * FACTOR_PROCESS_RANK);
+        let sequence = rem_c / FACTOR_SEQUENCE;
+        let rem_d = rem_c - (sequence * FACTOR_SEQUENCE);
+        let fault = rem_d / FACTOR_FAULT_EPOCH;
+        let rem_e = rem_d - (fault * FACTOR_FAULT_EPOCH);
+        return rem_e / FACTOR_MODE;
+    }
+
+    proc K::decode_layer(header: UInt64) {
+        let logical = decode_logical_ts(header);
+        let rem_a = header - (logical * FACTOR_LOGICAL_TS);
+        let node = rem_a / FACTOR_NODE_ID;
+        let rem_b = rem_a - (node * FACTOR_NODE_ID);
+        let rank = rem_b / FACTOR_PROCESS_RANK;
+        let rem_c = rem_b - (rank * FACTOR_PROCESS_RANK);
+        let sequence = rem_c / FACTOR_SEQUENCE;
+        let rem_d = rem_c - (sequence * FACTOR_SEQUENCE);
+        let fault = rem_d / FACTOR_FAULT_EPOCH;
+        let rem_e = rem_d - (fault * FACTOR_FAULT_EPOCH);
+        let mode = rem_e / FACTOR_MODE;
+        let rem_f = rem_e - (mode * FACTOR_MODE);
+        return rem_f / FACTOR_LAYER;
+    }
+
+    proc K::decode_domain(header: UInt64) {
+        let logical = decode_logical_ts(header);
+        let rem_a = header - (logical * FACTOR_LOGICAL_TS);
+        let node = rem_a / FACTOR_NODE_ID;
+        let rem_b = rem_a - (node * FACTOR_NODE_ID);
+        let rank = rem_b / FACTOR_PROCESS_RANK;
+        let rem_c = rem_b - (rank * FACTOR_PROCESS_RANK);
+        let sequence = rem_c / FACTOR_SEQUENCE;
+        let rem_d = rem_c - (sequence * FACTOR_SEQUENCE);
+        let fault = rem_d / FACTOR_FAULT_EPOCH;
+        let rem_e = rem_d - (fault * FACTOR_FAULT_EPOCH);
+        let mode = rem_e / FACTOR_MODE;
+        let rem_f = rem_e - (mode * FACTOR_MODE);
+        let layer = rem_f / FACTOR_LAYER;
+        let rem_g = rem_f - (layer * FACTOR_LAYER);
+        return rem_g / FACTOR_DOMAIN;
+    }
+
+    proc K::frame_order_key(header: UInt64) {
+        let logical = decode_logical_ts(header);
+        let node = decode_node_id(header);
+        let rank = decode_process_rank(header);
+        let seq = decode_sequence(header);
+        return (logical * 1000000000) + (node * 10000000) + (rank * 10000) + seq;
+    }
+
+    proc K::validate_frame_token(frame_token: UInt64, payload_hash: UInt64) {
+        let payload = decode_frame_payload(frame_token);
+        let normalized = normalize_payload_hash(payload_hash);
+        if payload == normalized {
+            let header = decode_frame_header(frame_token);
+            let domain = decode_domain(header);
+            let layer = decode_layer(header);
+            let mode = decode_mode(header);
+            let logical = decode_logical_ts(header);
+            let node = decode_node_id(header);
+            let rank = decode_process_rank(header);
+            let seq = decode_sequence(header);
+            let fault = decode_fault_epoch(header);
+            let rebuilt = encode_header(domain, layer, mode, logical, node, rank, seq, fault);
+            if rebuilt == header {
+                return STATUS_OK;
+            } else {
+                return STATUS_INVALID_FRAME;
+            }
+        } else {
+            return STATUS_INVALID_FRAME;
+        }
+    }
+}

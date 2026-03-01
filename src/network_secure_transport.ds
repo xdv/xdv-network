@@ -1,0 +1,207 @@
+// File: network_secure_transport.ds - This file is part of XDV
+// Copyright (c) 2026 Dust LLC, and Contributors
+// Description:
+//   xdv-network: secure transport hooks (STL) and deterministic session model.
+
+forge XdvNetworkSecureTransport {
+
+    const STATUS_OK: UInt32 = 0;
+    const STATUS_UNAUTHORIZED: UInt32 = 1;
+    const STATUS_INVALID_SESSION: UInt32 = 2;
+    const STATUS_ATTESTATION_FAILED: UInt32 = 3;
+    const STATUS_CAPABILITY_MISMATCH: UInt32 = 4;
+
+    const FACTOR_ATTEST_NONCE: UInt64 = 1000;
+    const FACTOR_ATTEST_DOMAIN: UInt64 = 100;
+    const FACTOR_ATTEST_LEVEL: UInt64 = 1;
+
+    const FACTOR_SESSION_DOMAIN: UInt64 = 1000000000000000;
+    const FACTOR_SESSION_SCOPE: UInt64 = 100000000000000;
+    const FACTOR_SESSION_PEER: UInt64 = 10000000;
+
+    const MAX_7_DIGITS: UInt64 = 9999999;
+
+    proc K::normalize_7digits(value: UInt64) {
+        if value > MAX_7_DIGITS {
+            return value - ((value / FACTOR_SESSION_PEER) * FACTOR_SESSION_PEER);
+        } else {
+            return value;
+        }
+    }
+
+    proc K::build_attestation_token(domain: UInt64, level: UInt64, issuer_nonce: UInt64) {
+        let nonce_part = normalize_7digits(issuer_nonce) * FACTOR_ATTEST_NONCE;
+        let domain_part = domain * FACTOR_ATTEST_DOMAIN;
+        let level_part = level * FACTOR_ATTEST_LEVEL;
+        return nonce_part + domain_part + level_part;
+    }
+
+    proc K::attested_domain(attestation_token: UInt64) {
+        let nonce = attestation_token / FACTOR_ATTEST_NONCE;
+        let remainder = attestation_token - (nonce * FACTOR_ATTEST_NONCE);
+        return remainder / FACTOR_ATTEST_DOMAIN;
+    }
+
+    proc K::attestation_level(attestation_token: UInt64) {
+        let nonce = attestation_token / FACTOR_ATTEST_NONCE;
+        let remainder = attestation_token - (nonce * FACTOR_ATTEST_NONCE);
+        let domain = remainder / FACTOR_ATTEST_DOMAIN;
+        let rem2 = remainder - (domain * FACTOR_ATTEST_DOMAIN);
+        return rem2 / FACTOR_ATTEST_LEVEL;
+    }
+
+    proc K::verify_attestation_for_domain(attestation_token: UInt64, domain: UInt64) {
+        let requires = XdvNetworkContracts::K::domain_requires_attestation(domain);
+        if requires == 0 {
+            return STATUS_OK;
+        } else {
+            if attestation_token == 0 {
+                return STATUS_ATTESTATION_FAILED;
+            } else {
+                let domain_valid = XdvNetworkContracts::K::is_domain_valid(domain);
+                if domain_valid == STATUS_OK {
+                    let encoded_domain = attested_domain(attestation_token);
+                    let level = attestation_level(attestation_token);
+                    if encoded_domain == domain {
+                        if level > 0 {
+                            return STATUS_OK;
+                        } else {
+                            return STATUS_ATTESTATION_FAILED;
+                        }
+                    } else {
+                        return STATUS_ATTESTATION_FAILED;
+                    }
+                } else {
+                    return STATUS_ATTESTATION_FAILED;
+                }
+            }
+        }
+    }
+
+    proc K::derive_hybrid_key_material(local_identity: UInt64, peer_identity: UInt64, pq_nonce: UInt64, hybrid_nonce: UInt64, capability_scope: UInt64, domain: UInt64) {
+        let cap_valid = XdvNetworkContracts::K::is_capability_valid_for_domain(domain, capability_scope);
+        if cap_valid == STATUS_OK {
+            let mixed = (local_identity * 97) + (peer_identity * 193) + (pq_nonce * 389) + (hybrid_nonce * 769) + (capability_scope * 1543) + (domain * 3079) + 4099;
+            return normalize_7digits(mixed);
+        } else {
+            return 0;
+        }
+    }
+
+    proc K::open_session(local_identity: UInt64, peer_identity: UInt64, capability_scope: UInt64, domain: UInt64, attestation_token: UInt64, pq_nonce: UInt64, hybrid_nonce: UInt64) {
+        let domain_valid = XdvNetworkContracts::K::is_domain_valid(domain);
+        if domain_valid == STATUS_OK {
+            let cap_valid = XdvNetworkContracts::K::is_capability_valid_for_domain(domain, capability_scope);
+            if cap_valid == STATUS_OK {
+                let attested = verify_attestation_for_domain(attestation_token, domain);
+                if attested == STATUS_OK {
+                    let key = derive_hybrid_key_material(local_identity, peer_identity, pq_nonce, hybrid_nonce, capability_scope, domain);
+                    if key == 0 {
+                        return 0;
+                    } else {
+                        let domain_part = domain * FACTOR_SESSION_DOMAIN;
+                        let scope_part = capability_scope * FACTOR_SESSION_SCOPE;
+                        let peer_part = normalize_7digits(peer_identity) * FACTOR_SESSION_PEER;
+                        return domain_part + scope_part + peer_part + key;
+                    }
+                } else {
+                    return 0;
+                }
+            } else {
+                return 0;
+            }
+        } else {
+            return 0;
+        }
+    }
+
+    proc K::session_domain(session_token: UInt64) {
+        return session_token / FACTOR_SESSION_DOMAIN;
+    }
+
+    proc K::session_capability_scope(session_token: UInt64) {
+        let domain = session_domain(session_token);
+        let remainder = session_token - (domain * FACTOR_SESSION_DOMAIN);
+        return remainder / FACTOR_SESSION_SCOPE;
+    }
+
+    proc K::session_peer_identity(session_token: UInt64) {
+        let domain = session_domain(session_token);
+        let rem_a = session_token - (domain * FACTOR_SESSION_DOMAIN);
+        let scope = rem_a / FACTOR_SESSION_SCOPE;
+        let rem_b = rem_a - (scope * FACTOR_SESSION_SCOPE);
+        return rem_b / FACTOR_SESSION_PEER;
+    }
+
+    proc K::session_key_material(session_token: UInt64) {
+        let domain = session_domain(session_token);
+        let rem_a = session_token - (domain * FACTOR_SESSION_DOMAIN);
+        let scope = rem_a / FACTOR_SESSION_SCOPE;
+        let rem_b = rem_a - (scope * FACTOR_SESSION_SCOPE);
+        let peer = rem_b / FACTOR_SESSION_PEER;
+        return rem_b - (peer * FACTOR_SESSION_PEER);
+    }
+
+    proc K::session_is_valid(session_token: UInt64) {
+        if session_token == 0 {
+            return STATUS_INVALID_SESSION;
+        } else {
+            let domain = session_domain(session_token);
+            let scope = session_capability_scope(session_token);
+            let domain_valid = XdvNetworkContracts::K::is_domain_valid(domain);
+            if domain_valid == STATUS_OK {
+                let cap_valid = XdvNetworkContracts::K::is_capability_valid_for_domain(domain, scope);
+                if cap_valid == STATUS_OK {
+                    let key = session_key_material(session_token);
+                    if key == 0 {
+                        return STATUS_INVALID_SESSION;
+                    } else {
+                        return STATUS_OK;
+                    }
+                } else {
+                    return STATUS_CAPABILITY_MISMATCH;
+                }
+            } else {
+                return STATUS_INVALID_SESSION;
+            }
+        }
+    }
+
+    proc K::stl_pre_send_hook(session_token: UInt64, frame_token: UInt64, payload_hash: UInt64) {
+        let session_status = session_is_valid(session_token);
+        if session_status == STATUS_OK {
+            let frame_status = XdvNetworkFrame::K::validate_frame_token(frame_token, payload_hash);
+            if frame_status == STATUS_OK {
+                let frame_header = XdvNetworkFrame::K::decode_frame_header(frame_token);
+                let frame_domain = XdvNetworkFrame::K::decode_domain(frame_header);
+                let session_domain_value = session_domain(session_token);
+                if frame_domain == session_domain_value {
+                    return STATUS_OK;
+                } else {
+                    return STATUS_UNAUTHORIZED;
+                }
+            } else {
+                return STATUS_UNAUTHORIZED;
+            }
+        } else {
+            return session_status;
+        }
+    }
+
+    proc K::stl_post_receive_hook(session_token: UInt64, frame_token: UInt64, payload_hash: UInt64) {
+        let pre = stl_pre_send_hook(session_token, frame_token, payload_hash);
+        if pre == STATUS_OK {
+            let scope = session_capability_scope(session_token);
+            let header = XdvNetworkFrame::K::decode_frame_header(frame_token);
+            let domain = XdvNetworkFrame::K::decode_domain(header);
+            let cap_status = XdvNetworkContracts::K::is_capability_valid_for_domain(domain, scope);
+            if cap_status == STATUS_OK {
+                return STATUS_OK;
+            } else {
+                return STATUS_CAPABILITY_MISMATCH;
+            }
+        } else {
+            return pre;
+        }
+    }
+}

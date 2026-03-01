@@ -1,78 +1,69 @@
-﻿# XDV Network
+# XDV Network
 
 Version: 0.1.0
-Status: planned
+Status: active
 Language: Dust Programming Language (DPL)
 
 ## Specification Alignment
 
-Primary specification: XDV-040 in xdv-spec.
+Primary specification: XDV-040 in `xdv-spec`.
+
+Implemented focus for this milestone:
+
+1. Deterministic framing and secure transport hooks.
+2. Domain-aware K/Q/Phi channels.
+3. Ordering validation under network faults.
 
 ## Purpose
 
 Cross-domain deterministic network stack for K/Q/Phi orchestration.
 
-## Scope
+## Modules
 
-This project is responsible for:
+- `src/network_contracts.ds`
+  Defines normative domain/layer/mode/capability/operation guards.
 
-- Implementing normative requirements defined by XDV-040.
-- Publishing deterministic behavior contracts for integration with xdv-os.
-- Providing reusable modules for cross-repo integration.
-- Supplying verification and conformance fixtures for regression control.
+- `src/network_frame.ds`
+  Deterministic frame header/token encode/decode and validation.
 
-## Planned Deliverables
+- `src/network_secure_transport.ds`
+  STL session model with attestation verification and send/receive hook checks.
 
-- knl, qdl, psl, stl
-- Public APIs in src/
-- Test fixtures in tests/
-- Design and interface docs in docs/
+- `src/network_channels.ds`
+  K/Q/Phi channel routing with policy checks, frame construction, and hook invocation.
 
-## Repository Layout
+- `src/network_order.ds`
+  Deterministic ordering and fault-path reconciliation logic.
 
-- src/ : core module implementations.
-- tests/ : deterministic unit/integration/conformance fixtures.
-- docs/ : architecture, protocol, and usage documentation.
-- State.toml : workspace manifest.
-- changelog.md : release and milestone notes.
+- `src/network_tests.ds`
+  Behavior tests for framing, transport, channel policy, and fault ordering.
 
-## Initial Module Plan
+- `src/main.ds`
+  Startup validation, smoke send, and self-test entrypoints.
 
-- src/main.ds: project entrypoint and top-level orchestration.
-- src/contracts.ds: normative contract models and validators.
-- src/protocol.ds: wire/protocol semantics for external interfaces.
-- src/errors.ds: canonical error model and deterministic mapping.
-- src/tests.ds: local test harness entry surface.
+## Design Notes
 
-## Dependencies
-
-Current planned dependencies:
-
-- xdv-kernel, xdv-runtime, xdv-sdbm, xdv-lib
-- dust runtime/toolchain packages as required by integration profile
-
-## Integration Contracts
-
-- Must preserve deterministic ordering semantics.
-- Must avoid implicit cross-domain state mutation.
-- Must emit structured metadata for replay and audit paths.
-- Must remain compatible with xdv-os build and boot/runtime contracts.
+- Q channel rejects raw-state transfer operations.
+- Phi channel rejects implicit merge operations.
+- Q/Phi session establishment requires attestation token validation.
+- Fault ordering reconciliation uses deterministic epoch selection and stable order keys.
 
 ## Build
 
+```bash
 dust check xdv-network/src
+```
 
 ## Test
 
-dust test xdv-network/tests
+```bash
+dust check xdv-network/src/network_tests.ds
+dust check xdv-network/tests/network_fault_ordering_e2e.ds
+```
 
-## Milestones
+## Integration Contracts
 
-1. M1: scaffold + contract models.
-2. M2: core pipeline implementation.
-3. M3: deterministic behavior and fixture hardening.
-4. M4: xdv-os integration and conformance gating.
-
-## Notes
-
-This project is initialized as a skeleton template and intentionally starts with minimal source implementation.
+- Preserve deterministic ordering semantics under fault paths.
+- Preserve capability-scope validation per domain.
+- Keep transport hook checks in path for all channel sends.
+- Keep behavior replay-equivalent for identical inputs.

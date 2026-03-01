@@ -1,0 +1,123 @@
+// File: network_order.ds - This file is part of XDV
+// Copyright (c) 2026 Dust LLC, and Contributors
+// Description:
+//   xdv-network: deterministic ordering and fault-order reconciliation.
+
+forge XdvNetworkOrder {
+
+    const STATUS_OK: UInt32 = 0;
+    const STATUS_ORDER_DIVERGED: UInt32 = 1;
+    const STATUS_INVALID_FAULT: UInt32 = 2;
+
+    const ORDER_EQUAL: UInt32 = 0;
+    const ORDER_LEFT_FIRST: UInt32 = 1;
+    const ORDER_RIGHT_FIRST: UInt32 = 2;
+
+    const FAULT_NONE: UInt64 = 0;
+    const FAULT_LINK_DROP: UInt64 = 1;
+    const FAULT_RETRY_TIMEOUT: UInt64 = 2;
+    const FAULT_PARTITIONED_PATH: UInt64 = 3;
+
+    const FAULT_EPOCH_BASE: UInt64 = 1;
+    const FAULT_EPOCH_LINK_DROP: UInt64 = 11;
+    const FAULT_EPOCH_RETRY_TIMEOUT: UInt64 = 21;
+    const FAULT_EPOCH_PARTITIONED_PATH: UInt64 = 31;
+
+    proc K::fault_epoch(fault_code: UInt64) {
+        if fault_code == FAULT_NONE {
+            return FAULT_EPOCH_BASE;
+        } else {
+            if fault_code == FAULT_LINK_DROP {
+                return FAULT_EPOCH_LINK_DROP;
+            } else {
+                if fault_code == FAULT_RETRY_TIMEOUT {
+                    return FAULT_EPOCH_RETRY_TIMEOUT;
+                } else {
+                    if fault_code == FAULT_PARTITIONED_PATH {
+                        return FAULT_EPOCH_PARTITIONED_PATH;
+                    } else {
+                        return 0;
+                    }
+                }
+            }
+        }
+    }
+
+    proc K::compare_order_keys(left_key: UInt64, right_key: UInt64) {
+        if left_key == right_key {
+            return ORDER_EQUAL;
+        } else {
+            if left_key < right_key {
+                return ORDER_LEFT_FIRST;
+            } else {
+                return ORDER_RIGHT_FIRST;
+            }
+        }
+    }
+
+    proc K::compare_headers(left_header: UInt64, right_header: UInt64) {
+        let left_key = XdvNetworkFrame::K::frame_order_key(left_header);
+        let right_key = XdvNetworkFrame::K::frame_order_key(right_header);
+        return compare_order_keys(left_key, right_key);
+    }
+
+    proc K::header_with_fault(domain: UInt64, layer: UInt64, mode: UInt64, logical_ts: UInt64, node_id: UInt64, process_rank: UInt64, sequence: UInt64, fault_code: UInt64) {
+        let epoch = fault_epoch(fault_code);
+        if epoch == 0 {
+            return 0;
+        } else {
+            return XdvNetworkFrame::K::encode_header(domain, layer, mode, logical_ts, node_id, process_rank, sequence, epoch);
+        }
+    }
+
+    proc K::validate_monotonic_order_without_fault(left_header: UInt64, right_header: UInt64) {
+        let cmp = compare_headers(left_header, right_header);
+        if cmp == ORDER_LEFT_FIRST {
+            return STATUS_OK;
+        } else {
+            if cmp == ORDER_EQUAL {
+                return STATUS_ORDER_DIVERGED;
+            } else {
+                return STATUS_ORDER_DIVERGED;
+            }
+        }
+    }
+
+    proc K::validate_monotonic_order_under_fault(base_header: UInt64, fault_header: UInt64, fault_code: UInt64) {
+        let epoch = fault_epoch(fault_code);
+        if epoch == 0 {
+            return STATUS_INVALID_FAULT;
+        } else {
+            let base_epoch = XdvNetworkFrame::K::decode_fault_epoch(base_header);
+            let new_epoch = XdvNetworkFrame::K::decode_fault_epoch(fault_header);
+            if new_epoch == epoch {
+                if new_epoch > base_epoch {
+                    let cmp = compare_headers(base_header, fault_header);
+                    if cmp == ORDER_LEFT_FIRST {
+                        return STATUS_OK;
+                    } else {
+                        return STATUS_ORDER_DIVERGED;
+                    }
+                } else {
+                    return STATUS_ORDER_DIVERGED;
+                }
+            } else {
+                return STATUS_ORDER_DIVERGED;
+            }
+        }
+    }
+
+    proc K::reconcile_fault_path(domain: UInt64, layer: UInt64, mode: UInt64, logical_ts: UInt64, node_id: UInt64, process_rank: UInt64, sequence: UInt64, fault_code: UInt64) {
+        let base_header = header_with_fault(domain, layer, mode, logical_ts, node_id, process_rank, sequence, FAULT_NONE);
+        let fault_header = header_with_fault(domain, layer, mode, logical_ts + 1, node_id, process_rank, sequence + 1, fault_code);
+        if base_header == 0 {
+            return STATUS_ORDER_DIVERGED;
+        } else {
+            if fault_header == 0 {
+                return STATUS_ORDER_DIVERGED;
+            } else {
+                return validate_monotonic_order_under_fault(base_header, fault_header, fault_code);
+            }
+        }
+    }
+}
